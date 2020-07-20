@@ -15,10 +15,9 @@ from inkex.styles import Style
 
 NULL_TRANSFORM = Transform([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
 
-
 class ApplyTransform(inkex.Effect):
     def __init__(self):
-        inkex.Effect.__init__(self)
+        inkex.Effect.__init__(self) 
 
     def effect(self):
         self.svg.get_selected()
@@ -42,17 +41,17 @@ class ApplyTransform(inkex.Effect):
 
         return node
 
-    def scaleStrokeWidth(self, node, transf):
+    def scalePxAttribute(self, node, transf, attr):
         if 'style' in node.attrib:
             style = node.attrib.get('style')
             style = dict(Style.parse_str(style))
             update = False
 
-            if 'stroke-width' in style:
+            if attr in style:
                 try:
-                    stroke_width = float(style.get('stroke-width').strip().replace("px", ""))
+                    stroke_width = float(style.get(attr).strip().replace("px", ""))
                     stroke_width *= math.sqrt(abs(transf.a * transf.d))
-                    style['stroke-width'] = str(stroke_width)
+                    style[attr] = str(max(stroke_width, 0.1)) + "px"
                     update = True
                 except AttributeError:
                     pass
@@ -60,7 +59,7 @@ class ApplyTransform(inkex.Effect):
             if update:
                 node.attrib['style'] = Style(style).to_str()
 
-    def recursiveFuseTransform(self, node, transf=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]):
+    def recursiveFuseTransform(self, node, transf=NULL_TRANSFORM):
 
         transf = Transform(transf) * Transform(node.get("transform", None))
 
@@ -79,7 +78,7 @@ class ApplyTransform(inkex.Effect):
             p = Path(p).to_absolute().transform(transf, True)
             node.set('d', Path(CubicSuperPath(p).to_path()))
 
-            self.scaleStrokeWidth(node, transf)
+            self.scalePxAttribute(node, transf, 'stroke-width')
 
         elif node.tag in [inkex.addNS('polygon', 'svg'),
                           inkex.addNS('polyline', 'svg')]:
@@ -96,7 +95,7 @@ class ApplyTransform(inkex.Effect):
             points = ' '.join(points)
             node.set('points', points)
 
-            self.scaleStrokeWidth(node, transf)
+            self.scalePxAttribute(node, transf, 'stroke-width')
 
         elif node.tag in [inkex.addNS("ellipse", "svg"), inkex.addNS("circle", "svg")]:
 
@@ -144,8 +143,29 @@ class ApplyTransform(inkex.Effect):
             else:
                 node.set("r", edgex / 2)
 
+        elif node.tag in [inkex.addNS('text', 'svg'), inkex.addNS('tspan', 'svg')]:
+            
+            x = float(node.get("x"))
+            y = float(node.get("y"))
+
+            xy = (x, y)
+
+            newxy = transf.apply_to_point(xy)
+
+            node.set("x", newxy[0])
+            node.set("y", newxy[1])
+
+            self.scalePxAttribute(node, transf, 'stroke-width')
+
+            # only scale font size by Y value of scale transform
+            self.scalePxAttribute(node, [[1.0, 0.0, 0.0], [0.0, transf.d, 0.0]], 'font-size')
+
+            inkex.utils.errormsg(
+                    "Warning: Only scale and translate transforms will be applied to shape %s (%s)"
+                    % (node.TAG, node.get("id"))
+                )
+
         elif node.tag in [inkex.addNS('rect', 'svg'),
-                          inkex.addNS('text', 'svg'),
                           inkex.addNS('image', 'svg'),
                           inkex.addNS('use', 'svg')]:
             inkex.utils.errormsg(
@@ -155,7 +175,7 @@ class ApplyTransform(inkex.Effect):
 
         else:
             # e.g. <g style="...">
-            self.scaleStrokeWidth(node, transf)
+            self.scalePxAttribute(node, transf, 'stroke-width')
 
         for child in node.getchildren():
             self.recursiveFuseTransform(child, transf)
